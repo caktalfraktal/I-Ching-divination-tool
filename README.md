@@ -1,6 +1,3 @@
-Download "threecoins.exe" as a standalone program or download the whole code with "threecoins.py"
-
-
 This program simulates tossing 3 virtual coins using the os.urandom function, which generates truly random "coin" flips of 0 (tails) or 1 (heads).
 
 Coin Flip Values:
@@ -28,3 +25,5 @@ If any of the lines are changing (i.e., 6 or 9), the program flips those lines t
 Hexagram Lookup:
 The lines of the hexagram are translated into a binary format (where 0 represents a Yin line and 1 represents a Yang line). 
 This binary sequence is then used to look up the corresponding hexagram from the I Ching in a pre-defined table, which provides the name, symbol, and meaning of the hexagram.
+
+Download "threecoins.exe" as a standalone program or download the whole code with "threecoins.py"
