@@ -1,4 +1,4 @@
-"threecoins.exe" as a standalone program or download the whole code with "threecoins.py"
+Download "threecoins.exe" as a standalone program or download the whole code with "threecoins.py"
 
 
 This program simulates tossing 3 virtual coins using the os.urandom function, which generates truly random "coin" flips of 0 (tails) or 1 (heads).
