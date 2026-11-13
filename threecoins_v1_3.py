@@ -152,7 +152,7 @@ def fetch_coin_values():
     RANDOM.ORG itself converts atmospheric noise into integers.
     """
     request = Request(RANDOM_ORG_URL, headers={
-        "User-Agent": "ThreeCoins/1.2",
+        "User-Agent": "ThreeCoins/1.3",
         "Accept": "text/plain", "Cache-Control": "no-cache",
     })
     try:
@@ -184,7 +184,7 @@ class IChing:
         except RandomSourceError:
             # Generate an entire local cast; never mix a partial online response.
             coins = [IChing.secure_coin_flip() for _ in range(18)]
-            return [2 if coin == 0 else 3 for coin in coins], "System source (offline/service fallback)"
+            return [2 if coin == 0 else 3 for coin in coins], "system source (offline)"
 
     @staticmethod
     def generate_line(coin_values):
@@ -233,9 +233,9 @@ class IChing:
 class IChingGUI:
     def __init__(self, master):
         self.master = master
-        master.title("I-Ching Divination Tool v1.2")
+        master.title("I-Ching Divination Tool v1.3")
         master.iconbitmap(str(Path(__file__).with_name("ico.ico")))
-        master.geometry("600x475")
+        master.geometry("600x500")
         self.frame = ttk.Frame(master, padding="10")
         self.frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         master.columnconfigure(0, weight=1)
