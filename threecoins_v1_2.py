@@ -1,6 +1,10 @@
+from pathlib import Path
 import os
+from queue import Queue, Empty
+from threading import Thread
+from urllib.request import Request, urlopen
 import tkinter as tk
-from tkinter import ttk, font
+from tkinter import ttk, font, messagebox
 HEXAGRAMS = {
     0: ("䷀", "The Creative", "Pure, dynamic energy and the force of creation."),
     1: ("䷁", "The Receptive", "Receptivity, nurturance and supportiveness."),
@@ -133,25 +137,68 @@ BINARY_TO_HEXAGRAM = {
     0b101010: 62,
     0b010101: 63
 }
+RANDOM_ORG_URL = (
+    "https://www.random.org/integers/?num=18&min=2&max=3"
+    "&col=1&base=10&format=plain&rnd=new"
+)
+
+class RandomSourceError(Exception):
+    """RANDOM.ORG did not supply a complete valid response."""
+
+def fetch_coin_values():
+    """Use all 18 returned coin values unchanged, in response order.
+
+    No local RNG, shuffle, seed, modulo, rescaling, or fallback is used.
+    RANDOM.ORG itself converts atmospheric noise into integers.
+    """
+    request = Request(RANDOM_ORG_URL, headers={
+        "User-Agent": "ThreeCoins/1.2",
+        "Accept": "text/plain", "Cache-Control": "no-cache",
+    })
+    try:
+        with urlopen(request, timeout=120) as response:
+            if response.status != 200:
+                raise ValueError("Unsuccessful response")
+            tokens = response.read(4097).decode("ascii").split()
+        if len(tokens) != 18 or any(token not in ("2", "3") for token in tokens):
+            raise ValueError("Expected exactly eighteen values of 2 or 3")
+        return [int(token) for token in tokens]
+    except Exception as exc:
+        raise RandomSourceError(
+            "Could not obtain a complete cast from RANDOM.ORG.\n\n"
+            "The connection or service may be unavailable."
+        ) from exc
+
 def binary_to_hexagram(binary):
     return BINARY_TO_HEXAGRAM[binary]
 class IChing:
     @staticmethod
     def secure_coin_flip():
+        # Exactly the system-source method from the original threecoins.py.
         return ord(os.urandom(1)) & 1
+
     @staticmethod
-    def generate_line():
-        coins = [IChing.secure_coin_flip() for _ in range(3)]
-        coin_values = [2 if coin == 0 else 3 for coin in coins]
+    def get_cast_coins():
+        try:
+            return fetch_coin_values(), "RANDOM.ORG (atmospheric noise)"
+        except RandomSourceError:
+            # Generate an entire local cast; never mix a partial online response.
+            coins = [IChing.secure_coin_flip() for _ in range(18)]
+            return [2 if coin == 0 else 3 for coin in coins], "System source (offline/service fallback)"
+
+    @staticmethod
+    def generate_line(coin_values):
         total = sum(coin_values)
-        line_value = 6 if total == 6 else 7 if total == 7 else 8 if total == 8 else 9
+        line_value = total
         return coin_values, total, line_value
     @staticmethod
-    def cast_hexagram():
+    def cast_hexagram(include_source=False):
         hexagram = []
         coin_results = []
-        for _ in range(6):
-            coins, total, line_value = IChing.generate_line()
+        values, source = IChing.get_cast_coins()
+        # First three values make the bottom line; last three make the top.
+        for start in range(0, 18, 3):
+            coins, total, line_value = IChing.generate_line(values[start:start + 3])
             hexagram.append(line_value)
             coin_results.append((coins, total))
         primary = int(''.join(['0' if line in [6, 8] else '1' for line in hexagram]), 2)
@@ -162,10 +209,11 @@ class IChing:
             secondary_hexagram = [line if i not in changing else 6 if line == 9 else 9 for i, line in enumerate(hexagram)]
             secondary_binary = int(''.join(['0' if line in [6, 8] else '1' for line in secondary_hexagram]), 2)
             secondary = binary_to_hexagram(secondary_binary)
-        return primary, secondary, coin_results, hexagram
+        result = (primary, secondary, coin_results, hexagram)
+        return (*result, source) if include_source else result
     @staticmethod
     def perform_divination():
-        primary, secondary, coin_results, hexagram = IChing.cast_hexagram()
+        primary, secondary, coin_results, hexagram, source = IChing.cast_hexagram(include_source=True)
         result = "Coin Tosses:\n"
         for i, (coins, total) in enumerate(coin_results, 1):
             result += f"Line {i}: Coins: {coins}, Total: {total}\n"
@@ -181,11 +229,12 @@ class IChing:
             result += f"Represents: {HEXAGRAMS[secondary][2]}"
         else:
             result += "No changing lines - no secondary hexagram."
-        return result
+        return result + f"\n\nRandomness source: {source}"
 class IChingGUI:
     def __init__(self, master):
         self.master = master
-        master.title("I-Ching Divination Tool")
+        master.title("I-Ching Divination Tool v1.2")
+        master.iconbitmap(str(Path(__file__).with_name("ico.ico")))
         master.geometry("600x475")
         self.frame = ttk.Frame(master, padding="10")
         self.frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -193,14 +242,41 @@ class IChingGUI:
         master.rowconfigure(0, weight=1)
         self.result_text = tk.Text(self.frame, height=25, width=70, wrap=tk.WORD)
         self.result_text.grid(column=0, row=0, pady=10, sticky=(tk.W, tk.E, tk.N, tk.S))
-        ttk.Button(self.frame, text="Cast Hexagram", command=self.show_divination).grid(column=0, row=1, pady=10)
+        self.cast_button = ttk.Button(self.frame, text="Cast Hexagram", command=self.show_divination)
+        self.cast_button.grid(column=0, row=1, pady=10)
+        self.pending = False
+        self.results = Queue()
         default_font = font.nametofont(self.result_text.cget("font"))
         self.result_text.tag_configure('normal', font=default_font)
         self.result_text.tag_configure('large', font=(default_font.actual()['family'], 20, 'bold'))
         self.frame.columnconfigure(0, weight=1)
         self.frame.rowconfigure(0, weight=1)
     def show_divination(self):
-        result = IChing.perform_divination()
+        if self.pending:
+            return
+        self.pending = True
+        self.cast_button.config(state=tk.DISABLED, text="Contacting RANDOM.ORG...")
+        Thread(target=self._cast_worker, daemon=True).start()
+        self.master.after(100, self._poll_result)
+
+    def _cast_worker(self):
+        # The worker never touches Tk; all UI updates stay on the main thread.
+        try:
+            self.results.put((True, IChing.perform_divination()))
+        except Exception as exc:
+            self.results.put((False, str(exc)))
+
+    def _poll_result(self):
+        try:
+            success, result = self.results.get_nowait()
+        except Empty:
+            self.master.after(100, self._poll_result)
+            return
+        self.pending = False
+        self.cast_button.config(state=tk.NORMAL, text="Cast Hexagram")
+        if not success:
+            messagebox.showerror("Cast unavailable", result, parent=self.master)
+            return
         self.result_text.delete(1.0, tk.END)
         for line in result.split('\n'):
             if line.startswith("Hexagram: "):
